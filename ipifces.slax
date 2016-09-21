@@ -1,0 +1,131 @@
+version 1.0;   /* XML version not script version */
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ 
+import "../import/junos.xsl";
+
+/*-------------------------------------------------*/
+/* A SLAX script providing information about L3    */
+/* interfaces together with VRRP status and 	   */
+/* Virtual Address.	  						       */
+/* Written by Michalis Mamalis                     */
+/*-------------------------------------------------*/
+
+
+/* ------------------------------------------------------------------ */
+/* Constants                                                          */
+/* ------------------------------------------------------------------ */
+var $APPNAME = 'jctyztp[' _ $junos-context/pid _ ']';
+var $SYSLOG = 'user.info';
+var $syslog-message = " User: " _ $user _ " Script: " _ $script _ " Hostname: " _ $hostname;
+
+
+/* ------------------------------------------------------------------ */
+/*                                MAIN                                */ 
+/* ------------------------------------------------------------------ */
+match / {
+  <op-script-results> {
+
+/*	Send a message to syslog about who is executing this script */
+        expr jcs:syslog("external.info", "script execution: started", $syslog-message);
+
+/* Get interfaces information with format:terse */
+        var $rpc = <get-interface-information> {
+                        <terse>;
+            }
+        var $interface-information = jcs:invoke( $rpc );
+        if(not( $interface-information )) {
+            expr jcs:syslog( $SYSLOG, $APPNAME, ":ERROR: unable to retrieve data from Junos API");
+            <xsl:message terminate="yes"> "Terminating.";
+        }
+
+/* Get VRRP information and record to a variable if VRRP is not running */
+        var $vrrp-information = jcs:invoke("get-vrrp-information");
+        if(not( $vrrp-information )) {
+            expr jcs:syslog( $SYSLOG, $APPNAME, ":ERROR: unable to retrieve data from Junos API");
+            <xsl:message terminate="yes"> "Terminating.";
+        }
+
+		<output> "Interface\tAdmin  Link   Protocol  VRRP-state    Local Address\t\t\tDescription";
+
+/* Check if VRRP is running and get all VRRP information displayed to the terminal*/		
+    	if ( not( $vrrp-information/message ) ) {
+        
+	    	for-each ( $interface-information/physical-interface/logical-interface/address-family ) {
+	        
+		        var $protocol = address-family-name;
+	    		var $ifce = ../name;
+	    		var $admin-status = ../admin-status;
+		    	var $oper-status = ../oper-status;
+		    	var $description = ../description;
+	    	    var $local-address = interface-address/ifa-local;
+            
+		        if ( ( $protocol = 'inet' || $protocol = 'inet6' ) &&
+		        	( contains($ifce,"ge") || contains($ifce,"xe") || contains($ifce,"ae") ) ) {
+	    	
+		    	    if ( $ifce == $vrrp-information/vrrp-interface[interface == $ifce]/interface ) {
+
+			            var $vrrp-status = $vrrp-information/vrrp-interface[interface == $ifce]/vrrp-state;
+			            var $vrrp-local-address = $vrrp-information/vrrp-interface[interface == $ifce]/local-interface-address;
+			            var $virtual-address = $vrrp-information/vrrp-interface[interface == $ifce]/virtual-ip-address;
+
+						<output> jcs:printf('%j1-16.16s%-7.7s%-7.7s%-10.10s%-14.14s%-34.34s%-48.48s',
+		            		$ifce,
+		    	        	$admin-status, 
+		    	        	$oper-status, 
+		    	        	$protocol,
+		    	        	$vrrp-status,
+		    	        	$local-address, 
+		    	        	$description); 
+
+					} else {
+
+			            var $vrrp-status = "n/a";
+			            var $vrrp-local-address = "n/a";
+			            var $virtual-address = "n/a";
+
+			    		<output> jcs:printf('%j1-16.16s%-7.7s%-7.7s%-10.10s%-14.14s%-34.34s%-48.48s',
+		            		$ifce,
+		    	        	$admin-status, 
+		    	        	$oper-status, 
+		    	        	$protocol,
+		    	        	$vrrp-status,
+		    	        	$local-address, 
+		    	        	$description); 
+							
+					}
+    	        }
+	    	}       
+        } else {
+
+	    	for-each ( $interface-information/physical-interface/logical-interface/address-family ) {
+	        
+		        var $protocol = address-family-name;
+	    		var $ifce = ../name;
+	    		var $admin-status = ../admin-status;
+		    	var $oper-status = ../oper-status;
+		    	var $description = ../description;
+	    	    var $local-address = interface-address/ifa-local;
+	    	    var $vrrp-status = "n/a";
+            
+		        if ( ( $protocol = 'inet' || $protocol = 'inet6' ) &&
+		        	( contains($ifce,"ge") || contains($ifce,"xe") || contains($ifce,"ae") ) ) {
+		        	
+		    		<output> jcs:printf('%j1-16.16s%-7.7s%-7.7s%-10.10s%-14.14s%-34.34s%-48.48s',
+	            		$ifce,
+	    	        	$admin-status, 
+	    	        	$oper-status, 
+	    	        	$protocol,
+	    	        	$vrrp-status,
+	    	        	$local-address, 
+	    	        	$description);   
+		    	}
+	    	} 
+        }
+/* We are done so send a message to syslog */
+    expr jcs:syslog("external.info", "script execution: ended", $syslog-message);
+	}
+}

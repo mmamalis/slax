@@ -1,0 +1,87 @@
+version 1.0;   /* XML version not script version */
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns ext = "http://xmlsoft.org/XSLT/namespace";
+ 
+import "../import/junos.xsl";
+
+
+/*-------------------------------------------------*/
+/* A SLAX script providing the VRRP interfaces     */
+/* with each interface Description.                */
+/* Written by Michalis Mamalis                     */
+/* Version 0.2: fixed IPv6 address issue and added */
+/* IPv6 Link Local output                          */
+/*-------------------------------------------------*/
+
+
+/* ------------------------------------------------------------------ */
+/* Constants                                                          */
+/* ------------------------------------------------------------------ */
+var $APPNAME = 'jctyztp[' _ $junos-context/pid _ ']';
+var $SYSLOG = 'user.info';
+var $syslog-message = "User: " _ $user _ " Script: " _ $script _ " Hostname: " _ $hostname;
+
+
+/* ------------------------------------------------------------------ */
+/*                                MAIN                                */ 
+/* ------------------------------------------------------------------ */
+match / {
+    <op-script-results> {
+        
+        expr jcs:syslog("external.info", "script execution: started", $syslog-message);
+
+        /* Get interfaces information */
+        var $interface-information = jcs:invoke("get-interface-information");
+        if(not( $interface-information )) {
+            expr jcs:syslog( $SYSLOG, $APPNAME, ":ERROR: unable to retrieve data from Junos API");
+            <xsl:message terminate="yes"> "Terminating.";
+        }
+
+        /* Get VRRP brief */
+        var $vrrp-interfaces = jcs:invoke("get-vrrp-information");
+        if(not( $vrrp-interfaces )) {
+            expr jcs:syslog( $SYSLOG, $APPNAME, ":ERROR: unable to retrieve data from Junos API");
+            <xsl:message terminate="yes"> "Terminating.";
+        }
+
+        /* If VRRP is not running then send a message to syslog and terminate */
+        if( $vrrp-interfaces/vrrp-message/message == "VRRP is not running" ) {
+            expr jcs:syslog("external.info", "VRR{ script: no VRRP interfaces with status admin up found");
+            <xsl:message terminate="yes"> "Terminating.";       
+        }
+
+        <output> "Interface\tStatus\tVRRP\tLocal Address\t\t\tVIP (IPv4 public & IPv6 LL)\tVIP (IPv6 public)\t\tDescription";
+
+        for-each ($vrrp-interfaces/vrrp-interface) {
+
+                var $vrrp-ifce =./interface;
+                var $ifce-state = ./interface-state;
+                var $vrrp-status = ./vrrp-state;
+                var $vrrp-local-address = ./local-interface-address;
+                var $virtual-address = ./virtual-ip-address;
+            
+            for-each ($interface-information/physical-interface/logical-interface) {
+
+                var $logical-interface = ./name;
+                var $description = ./description;
+
+            /* if an interface on the box is also VRRP interface then get it */            
+                if ( $logical-interface == $vrrp-ifce ) {
+                
+                    <output> jcs:printf('%-16.16s%-8.8s%-8.8s%-32.32s%-32.32s%-32.32s%-38.38s', 
+                        $logical-interface,
+                        $ifce-state,
+                        $vrrp-status,
+                        $vrrp-local-address,
+                        $virtual-address[1], 
+                        $virtual-address[2], 
+                        $description );
+                } 
+            }
+        }
+    expr jcs:syslog("external.info", "script execution: ended", $syslog-message);
+    }
+}
